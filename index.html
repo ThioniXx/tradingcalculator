@@ -2,34 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Trading Outcome Calculator</title>
+  <title>Margin Calculator</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.5; }
-    input, select { margin: 5px; padding: 5px; }
+    input { margin: 5px; padding: 5px; width: 120px; }
     button { margin: 10px 0; padding: 8px 12px; }
-    table { border-collapse: collapse; margin-top: 15px; }
-    table, th, td { border: 1px solid #ccc; padding: 6px 10px; }
+    table { border-collapse: collapse; margin-top: 15px; min-width: 400px; }
+    table, th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
     th { background: #f2f2f2; }
   </style>
 </head>
 <body>
 
-  <h2>Trading Outcome Calculator</h2>
+  <h2>Trading Margin Calculator</h2>
 
-  <label>Margin ($): <input id="margin" type="number" value="100"></label><br>
-  <label>Leverage: <input id="leverage" type="number" value="10"></label><br>
   <label>Take Profit (%): <input id="tp" type="number" step="0.01" value="3"></label><br>
   <label>Stop Loss (%): <input id="sl" type="number" step="0.01" value="1.5"></label><br>
-  <label>Entry Fee (%): <input id="feeEntry" type="number" step="0.001" value="0.04"></label><br>
-  <label>Exit Fee (%): <input id="feeExit" type="number" step="0.001" value="0.06"></label><br>
-  <label>Direction: 
-    <select id="direction">
-      <option value="long">Long</option>
-      <option value="short">Short</option>
-    </select>
-  </label><br>
-  <label>Desired Profit ($): <input id="desiredProfit" type="number" value="50"></label><br>
-  <label>Max Loss ($): <input id="maxLoss" type="number" value="20"></label><br>
+  <label>Leverage: <input id="leverage" type="number" value="10"></label><br>
+  <label>Maker Fee (%): <input id="feeEntry" type="number" step="0.001" value="0.04"></label><br>
+  <label>Taker Fee (%): <input id="feeExit" type="number" step="0.001" value="0.06"></label><br>
+  <label>Desired Profit ($): <input id="desiredProfit" type="number"></label><br>
+  <label>Desired Loss ($): <input id="maxLoss" type="number"></label><br>
 
   <button onclick="calculate()">Calculate</button>
 
@@ -37,63 +30,61 @@
 
 <script>
 function calculate() {
-  let margin = parseFloat(document.getElementById("margin").value);
-  let leverage = parseFloat(document.getElementById("leverage").value);
   let tp_pct = parseFloat(document.getElementById("tp").value) / 100;
   let sl_pct = parseFloat(document.getElementById("sl").value) / 100;
+  let leverage = parseFloat(document.getElementById("leverage").value);
   let fee_entry = parseFloat(document.getElementById("feeEntry").value) / 100;
   let fee_exit = parseFloat(document.getElementById("feeExit").value) / 100;
-  let direction = document.getElementById("direction").value;
   let desiredProfit = parseFloat(document.getElementById("desiredProfit").value);
   let maxLoss = parseFloat(document.getElementById("maxLoss").value);
 
-  let N = margin * leverage;
+  let margin = null;
+  let notional = null;
+  let netProfitTP = null;
+  let netLossSL = null;
 
-  let tp_price, sl_price, grossProfit, grossLoss;
-  if (direction === "long") {
-    tp_price = 1 + tp_pct;
-    sl_price = 1 - sl_pct;
-    grossProfit = N * tp_pct;
-    grossLoss = N * sl_pct;
+  if (!isNaN(desiredProfit) && desiredProfit > 0) {
+    // solve margin for target profit
+    let denom = leverage * (tp_pct - fee_entry - (1 + tp_pct) * fee_exit);
+    if (denom > 0) {
+      margin = desiredProfit / denom;
+    } else {
+      document.getElementById("output").innerHTML = "<p>Target profit not achievable with given inputs.</p>";
+      return;
+    }
+  } else if (!isNaN(maxLoss) && maxLoss > 0) {
+    // solve margin for max loss
+    let denom = leverage * (sl_pct + fee_entry + (1 - sl_pct) * fee_exit);
+    if (denom > 0) {
+      margin = maxLoss / denom;
+    } else {
+      document.getElementById("output").innerHTML = "<p>Target loss not achievable with given inputs.</p>";
+      return;
+    }
   } else {
-    tp_price = 1 - tp_pct;
-    sl_price = 1 + sl_pct;
-    grossProfit = N * tp_pct;
-    grossLoss = N * sl_pct;
+    document.getElementById("output").innerHTML = "<p>Please enter either Desired Profit or Desired Loss.</p>";
+    return;
   }
 
-  let entryFee = N * fee_entry;
-  let exitFeeTP = (N * tp_price) * fee_exit;
-  let exitFeeSL = (N * sl_price) * fee_exit;
+  notional = margin * leverage;
 
-  let netProfitTP = grossProfit - entryFee - exitFeeTP;
-  let netLossSL = grossLoss + entryFee + exitFeeSL;
+  // profit & loss values with fees
+  let grossProfit = notional * tp_pct;
+  let entryFee = notional * fee_entry;
+  let exitFeeTP = (notional * (1 + tp_pct)) * fee_exit;
+  netProfitTP = grossProfit - entryFee - exitFeeTP;
 
-  let pctReturnTP = (netProfitTP / margin) * 100;
-  let pctLossSL = (netLossSL / margin) * 100;
-
-  // margin required for profit
-  let denomProfit = leverage * (tp_pct - fee_entry - (1 + tp_pct) * fee_exit);
-  let requiredMargin = denomProfit > 0 ? (desiredProfit / denomProfit) : "Not achievable";
-
-  // margin allowed for max loss
-  let denomLoss = leverage * (sl_pct + fee_entry + (1 - sl_pct) * fee_exit);
-  let allowedMargin = denomLoss > 0 ? (maxLoss / denomLoss) : "Not achievable";
+  let grossLoss = notional * sl_pct;
+  let exitFeeSL = (notional * (1 - sl_pct)) * fee_exit;
+  netLossSL = grossLoss + entryFee + exitFeeSL;
 
   let html = `
     <h3>Results</h3>
     <table>
-      <tr><th>Position Notional</th><td>$${N.toFixed(2)}</td></tr>
-      <tr><th>TP Price</th><td>${tp_price.toFixed(4)}</td></tr>
-      <tr><th>SL Price</th><td>${sl_price.toFixed(4)}</td></tr>
-      <tr><th>Gross Profit at TP</th><td>$${grossProfit.toFixed(2)}</td></tr>
+      <tr><th>Required Margin</th><td>$${margin.toFixed(2)}</td></tr>
+      <tr><th>Position Notional</th><td>$${notional.toFixed(2)}</td></tr>
       <tr><th>Net Profit at TP</th><td>$${netProfitTP.toFixed(2)}</td></tr>
-      <tr><th>Return on Margin at TP</th><td>${pctReturnTP.toFixed(2)}%</td></tr>
-      <tr><th>Gross Loss at SL</th><td>$${grossLoss.toFixed(2)}</td></tr>
       <tr><th>Net Loss at SL</th><td>$${netLossSL.toFixed(2)}</td></tr>
-      <tr><th>Loss on Margin at SL</th><td>${pctLossSL.toFixed(2)}%</td></tr>
-      <tr><th>Margin required for $${desiredProfit} profit</th><td>${typeof requiredMargin === "string" ? requiredMargin : "$" + requiredMargin.toFixed(2)}</td></tr>
-      <tr><th>Max margin for $${maxLoss} loss</th><td>${typeof allowedMargin === "string" ? allowedMargin : "$" + allowedMargin.toFixed(2)}</td></tr>
     </table>
   `;
   document.getElementById("output").innerHTML = html;
